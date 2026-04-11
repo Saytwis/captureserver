@@ -24,7 +24,7 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 NTFY_TOPIC = os.environ.get("NTFY_TOPIC", "your-secret-topic-here")
 PORT = int(os.environ.get("PORT", 5050))
 
-PROMPT = "Look at this image. If it's a multiple choice question, identify the correct answer and respond with ONLY a single letter based on its position from top to bottom (or left to right): A for 1st, B for 2nd, C for 3rd, D for 4th, E for 5th, F for 6th. It doesn't matter if the choices are labeled with letters, numbers, or nothing at all. For any other question, give the shortest possible answer. No explanation."
+PROMPT = "Answer this question. Rules: (1) Multiple choice → respond with ONLY the letter (A, B, C, D, E, or F) based on position from top to bottom. (2) Calculation/numeric question → respond with ONLY the final numeric answer including units if needed. (3) Never show work, steps, or explanation. (4) Maximum 50 characters total. Just the answer, nothing else."
 
 # --- LOGGING ---
 logging.basicConfig(
