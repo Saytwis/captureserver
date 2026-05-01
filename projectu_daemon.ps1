@@ -58,9 +58,9 @@ public class ProjectU
     [StructLayout(LayoutKind.Sequential)]
     public struct RECT { public int Left, Top, Right, Bottom; }
 
-    public static bool IsRightCtrlPressed()
+    public static bool IsRightAltPressed()
     {
-        return (GetAsyncKeyState(0xA3) & 0x8000) != 0;
+        return (GetAsyncKeyState(0xA5) & 0x8000) != 0;
     }
 
     public static byte[] CaptureScreen()
@@ -145,7 +145,7 @@ public class ProjectU
 $processing = $false
 
 while ($true) {
-    if ([ProjectU]::IsRightCtrlPressed() -and -not $processing) {
+    if ([ProjectU]::IsRightAltPressed() -and -not $processing) {
         $processing = $true
 
         try {
@@ -158,7 +158,7 @@ while ($true) {
         }
 
         # Wait for key release so it doesn't fire repeatedly
-        while ([ProjectU]::IsRightCtrlPressed()) {
+        while ([ProjectU]::IsRightAltPressed()) {
             Start-Sleep -Milliseconds 50
         }
 
