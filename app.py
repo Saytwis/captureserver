@@ -100,11 +100,8 @@ def validate_machine(user_code, machine_id):
 
 
 def get_user_ntfy_topic(code):
-    """Get the ntfy topic for a specific user."""
-    # TODO: Each user should have their own ntfy topic
-    # For now, use the global one
-    # In production: return user-specific topic from DB
-    return NTFY_TOPIC
+    # Each user gets their own channel
+    return f"projectu_{code}"
 
 
 # ==============================================================
