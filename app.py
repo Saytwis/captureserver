@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """
-server.py — Cloud server for capturewindows
+app.py — Cloud server for Project U
 ---------------------------------------------
-Receives screenshots from windows_daemon, sends to Gemini, pushes answer
-to phone via ntfy.
+1. Serves PowerShell/Mac daemon scripts to authenticated users
+2. Receives screenshots from daemons
+3. Sends to Gemini for analysis
+4. Pushes answer to phone via ntfy
 
 Deploy on Render.com:
     1. Push this folder to a GitHub repo
@@ -14,7 +16,9 @@ Deploy on Render.com:
 
 import os
 import logging
-from flask import Flask, request, jsonify
+import hashlib
+import time
+from flask import Flask, request, jsonify, Response, abort
 from google import genai
 from google.genai import types
 import requests as http_requests
@@ -24,7 +28,15 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 NTFY_TOPIC = os.environ.get("NTFY_TOPIC", "your-secret-topic-here")
 PORT = int(os.environ.get("PORT", 5050))
 
-PROMPT = "Answer this question. Rules: (1) Multiple choice → respond with ONLY the letter (A, B, C, D, E, or F) based on position from top to bottom. (2) Calculation/numeric question → respond with ONLY the final numeric answer including units if needed. (3) Never show work, steps, or explanation. (4) Maximum 50 characters total. Just the answer, nothing else."
+PROMPT = (
+    "Answer this question. Rules: "
+    "(1) Multiple choice → respond with ONLY the letter (A, B, C, D, E, or F) "
+    "based on position from top to bottom. "
+    "(2) Calculation/numeric question → respond with ONLY the final numeric answer "
+    "including units if needed. "
+    "(3) Never show work, steps, or explanation. "
+    "(4) Maximum 50 characters total. Just the answer, nothing else."
+)
 
 # --- LOGGING ---
 logging.basicConfig(
@@ -42,24 +54,226 @@ client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 app = Flask(__name__)
 
 
-def push_to_phone(message):
+# ==============================================================
+# USER VALIDATION
+# ==============================================================
+# TODO: Replace with real database (SQLite, PostgreSQL, etc.)
+# For now, using an in-memory dict. This resets on server restart.
+# In production, use a real database.
+
+user_machines = {}  # {"user_code": "machine_id"}
+
+
+def validate_user(code):
+    """Check if user code is valid and paid."""
+    if not code or len(code) < 5:
+        return False
+    # TODO: Check against Stripe/database if user has paid
+    return True
+
+
+def validate_machine(user_code, machine_id):
+    """Lock a user code to one machine.
+
+    First use: registers the machine. All subsequent uses must
+    come from the same machine or they get rejected.
+    """
+    if not user_code or not machine_id:
+        return False
+
+    if user_code not in user_machines:
+        # First time this code is used — register this machine
+        user_machines[user_code] = machine_id
+        logger.info(f"User {user_code[:6]} registered to machine {machine_id[:8]}...")
+        return True
+
+    if user_machines[user_code] == machine_id:
+        # Same machine — allowed
+        return True
+
+    # Different machine — blocked
+    logger.warning(
+        f"User {user_code[:6]} tried from different machine. "
+        f"Expected {user_machines[user_code][:8]}, got {machine_id[:8]}"
+    )
+    return False
+
+
+def get_user_ntfy_topic(code):
+    """Get the ntfy topic for a specific user."""
+    # TODO: Each user should have their own ntfy topic
+    # For now, use the global one
+    # In production: return user-specific topic from DB
+    return NTFY_TOPIC
+
+
+# ==============================================================
+# DAEMON SCRIPT SERVING (OBFUSCATED)
+# ==============================================================
+
+# Upload URL that the daemon will POST screenshots to
+UPLOAD_URL = os.environ.get("UPLOAD_URL", "")
+
+def get_upload_url():
+    """Get the upload URL, falling back to constructing from request."""
+    if UPLOAD_URL:
+        return UPLOAD_URL
+    return f"{request.scheme}://{request.host}/upload"
+
+
+def obfuscate_script(script):
+    """Base64 encode the script so users can't read it.
+
+    Even if someone runs 'irm yourserver.com/s/CODE' without |iex,
+    they see a wall of Base64 characters, not readable code.
+    """
+    import base64
+    encoded = base64.b64encode(script.encode("utf-8")).decode("ascii")
+    # Return a tiny PowerShell stub that decodes and executes in memory
+    # The actual script never touches disk, never appears in readable form
+    wrapper = (
+        f"iex([System.Text.Encoding]::UTF8.GetString("
+        f"[Convert]::FromBase64String('{encoded}')))"
+    )
+    return wrapper
+
+
+@app.route("/s/<user_code>")
+def serve_windows_daemon(user_code):
+    """Serve obfuscated PowerShell daemon for Windows users.
+
+    User runs:
+        powershell -W Hidden -EP Bypass -C "irm https://yourserver.com/s/USERCODE|iex"
+
+    What they see if they try to read it: a wall of Base64 gibberish.
+    What actually happens: decodes in memory, runs, never saved to disk.
+    """
+    if not validate_user(user_code):
+        logger.warning(f"Invalid user code attempted: {user_code[:10]}")
+        abort(403)
+
+    logger.info(f"Serving Windows daemon for user: {user_code[:6]}...")
+
+    try:
+        with open("projectu_daemon.ps1", "r") as f:
+            script = f.read()
+    except FileNotFoundError:
+        logger.error("projectu_daemon.ps1 not found!")
+        abort(500)
+
+    # Inject user-specific config
+    upload_url = get_upload_url()
+    script = script.replace("{{SERVER_URL}}", upload_url)
+    script = script.replace("{{USER_CODE}}", user_code)
+
+    # Obfuscate so user can't read the code
+    obfuscated = obfuscate_script(script)
+
+    return Response(obfuscated, mimetype="text/plain")
+
+
+@app.route("/m/<user_code>")
+def serve_mac_daemon(user_code):
+    """Serve obfuscated bash daemon for Mac users.
+
+    User runs:
+        curl -s https://yourserver.com/m/USERCODE | bash
+
+    The script is Base64 encoded — user sees gibberish if they
+    curl without piping to bash.
+    """
+    if not validate_user(user_code):
+        logger.warning(f"Invalid user code attempted: {user_code[:10]}")
+        abort(403)
+
+    logger.info(f"Serving Mac daemon for user: {user_code[:6]}...")
+
+    try:
+        with open("projectu_daemon_mac.sh", "r") as f:
+            script = f.read()
+    except FileNotFoundError:
+        logger.error("projectu_daemon_mac.sh not found!")
+        abort(500)
+
+    # Inject user-specific config
+    upload_url = get_upload_url()
+    script = script.replace("{{SERVER_URL}}", upload_url)
+    script = script.replace("{{USER_CODE}}", user_code)
+
+    # Obfuscate: wrap in base64 decode + eval for bash
+    import base64
+    encoded = base64.b64encode(script.encode("utf-8")).decode("ascii")
+    wrapper = f'eval "$(echo {encoded} | base64 -d)"'
+
+    return Response(wrapper, mimetype="text/plain")
+
+
+# ==============================================================
+# SCREENSHOT UPLOAD + LLM + NOTIFICATION
+# ==============================================================
+
+def push_to_phone(message, topic=None):
+    """Send answer to user's phone via ntfy."""
+    ntfy_topic = topic or NTFY_TOPIC
     try:
         resp = http_requests.post(
-            f"https://ntfy.sh/{NTFY_TOPIC}",
+            f"https://ntfy.sh/{ntfy_topic}",
             data=message.encode("utf-8"),
-            headers={"Title": "Notification", "Priority": "high"},
+            headers={"Title": "Project U", "Priority": "high"},
             timeout=10,
         )
         if resp.ok:
-            logger.info("Notification sent to phone")
+            logger.info(f"Notification sent to phone (topic: {ntfy_topic})")
         else:
             logger.error(f"ntfy error: {resp.status_code}")
     except Exception as e:
         logger.error(f"ntfy failed: {e}")
 
 
+def push_buzz_answer(answer_letter, topic=None):
+    """Send multiple notifications for stealth buzz mode.
+
+    A=1 buzz, B=2 buzzes, C=3 buzzes, D=4 buzzes
+    """
+    ntfy_topic = topic or NTFY_TOPIC
+    letter_map = {"A": 1, "B": 2, "C": 3, "D": 4, "E": 5, "F": 6}
+    buzz_count = letter_map.get(answer_letter.upper().strip(), 0)
+
+    if buzz_count == 0:
+        # Not a simple letter answer, send as text instead
+        push_to_phone(answer_letter, topic)
+        return
+
+    for i in range(buzz_count):
+        try:
+            http_requests.post(
+                f"https://ntfy.sh/{ntfy_topic}",
+                data=" ",
+                headers={"Title": " ", "Priority": "high"},
+                timeout=10,
+            )
+        except Exception:
+            pass
+        if i < buzz_count - 1:
+            time.sleep(0.7)  # Gap between buzzes
+
+    logger.info(f"Sent {buzz_count} buzzes for answer: {answer_letter}")
+
+
 @app.route("/upload", methods=["POST"])
 def upload():
+    """Receive screenshot, send to Gemini, push answer to phone."""
+
+    # Check user auth
+    user_code = request.headers.get("X-User-Code", "")
+    machine_id = request.headers.get("X-Machine-ID", "")
+
+    if user_code and not validate_user(user_code):
+        return jsonify({"error": "Invalid user code"}), 403
+
+    if user_code and machine_id and not validate_machine(user_code, machine_id):
+        return jsonify({"error": "This code is already registered to another machine"}), 403
+
     if "file" not in request.files:
         return jsonify({"error": "No file"}), 400
 
@@ -79,18 +293,34 @@ def upload():
                 PROMPT,
             ],
         )
+
         answer = response.text.strip()
         logger.info(f"Answer: {answer}")
 
-        push_to_phone(answer)
+        # Get user-specific ntfy topic
+        user_topic = get_user_ntfy_topic(user_code) if user_code else NTFY_TOPIC
+
+        # Check if answer is a single letter (multiple choice)
+        # If so, and buzz mode is requested, send buzzes
+        buzz_mode = request.headers.get("X-Buzz-Mode", "false").lower() == "true"
+
+        if buzz_mode and len(answer) == 1 and answer.upper() in "ABCDEF":
+            push_buzz_answer(answer, user_topic)
+        else:
+            push_to_phone(answer, user_topic)
 
         return jsonify({"status": "ok", "answer": answer}), 200
 
     except Exception as e:
         logger.error(f"Error: {e}")
-        push_to_phone(f"Error: {str(e)[:80]}")
+        user_topic = get_user_ntfy_topic(user_code) if user_code else NTFY_TOPIC
+        push_to_phone(f"Error: {str(e)[:80]}", user_topic)
         return jsonify({"error": str(e)}), 500
 
+
+# ==============================================================
+# HEALTH + INDEX
+# ==============================================================
 
 @app.route("/health", methods=["GET"])
 def health():
@@ -103,7 +333,7 @@ def health():
 
 @app.route("/", methods=["GET"])
 def index():
-    return "capturewindows server is running. POST to /upload"
+    return "Project U server is running. POST to /upload"
 
 
 if __name__ == "__main__":
