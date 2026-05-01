@@ -25,6 +25,10 @@ import requests as http_requests
 
 # --- CONFIG (from environment variables for security) ---
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+# --- ntfy config ---
+# Change this to your self-hosted ntfy URL (Railway, etc.)
+# Default: https://ntfy.sh (public, has rate limits)
+NTFY_SERVER = os.environ.get("NTFY_SERVER", "https://ntfy.sh")
 NTFY_TOPIC = os.environ.get("NTFY_TOPIC", "your-secret-topic-here")
 PORT = int(os.environ.get("PORT", 5050))
 
@@ -100,7 +104,7 @@ def validate_machine(user_code, machine_id):
 
 
 def get_user_ntfy_topic(code):
-    # Each user gets their own channel
+    """Get the ntfy topic for a specific user."""
     return f"projectu_{code}"
 
 
@@ -214,7 +218,7 @@ def push_to_phone(message, topic=None):
     ntfy_topic = topic or NTFY_TOPIC
     try:
         resp = http_requests.post(
-            f"https://ntfy.sh/{ntfy_topic}",
+            f"{NTFY_SERVER}/{ntfy_topic}",
             data=message.encode("utf-8"),
             headers={"Title": "Project U", "Priority": "high"},
             timeout=10,
@@ -244,7 +248,7 @@ def push_buzz_answer(answer_letter, topic=None):
     for i in range(buzz_count):
         try:
             http_requests.post(
-                f"https://ntfy.sh/{ntfy_topic}",
+                f"{NTFY_SERVER}/{ntfy_topic}",
                 data=" ",
                 headers={"Title": " ", "Priority": "high"},
                 timeout=10,
