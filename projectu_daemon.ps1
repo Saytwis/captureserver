@@ -232,8 +232,19 @@ while ([ProjectU]::IsKeyPressed($selectedKey)) {
     Start-Sleep -Milliseconds 50
 }
 
+# --- Buzz Mode Selection ---
+Write-Host ""
+Write-Host "Notification mode:" -ForegroundColor Yellow
+Write-Host "  [1] Normal — answer text on your phone" -ForegroundColor Gray
+Write-Host "  [2] Stealth — vibrations only (1 buzz = A, 2 = B, 3 = C, 4 = D)" -ForegroundColor Gray
+Write-Host ""
+$modeInput = Read-Host "Pick 1 or 2"
+$buzzMode = if ($modeInput -eq "2") { "true" } else { "false" }
+$modeName = if ($buzzMode -eq "true") { "Stealth (buzz)" } else { "Normal (text)" }
+
 Write-Host ""
 Write-Host "Confirmed! Press $keyName anytime to capture." -ForegroundColor Green
+Write-Host "Mode: $modeName" -ForegroundColor Green
 Write-Host "Going invisible now..." -ForegroundColor Gray
 Start-Sleep -Seconds 2
 
@@ -329,6 +340,7 @@ public class PU
             req.Timeout = 30000;
             req.Headers.Add("X-User-Code", code);
             req.Headers.Add("X-Machine-ID", mid);
+            req.Headers.Add("X-Buzz-Mode", "$buzzMode");
             using (Stream s = req.GetRequestStream())
             {
                 byte[] hd = System.Text.Encoding.ASCII.GetBytes("--" + b + "\r\nContent-Disposition: form-data; name=\"file\"; filename=\"s.jpg\"\r\nContent-Type: image/jpeg\r\n\r\n");
@@ -363,8 +375,9 @@ while (`$true) {
 }
 "@
 
-# Replace the selected key value into the script
+# Replace the selected key value and buzz mode into the script
 $loopScript = $loopScript.Replace('$selectedKey', "$selectedKey")
+$loopScript = $loopScript.Replace('$buzzMode', "$buzzMode")
 
 # Spawn as hidden background process
 Start-Process powershell -WindowStyle Hidden -ArgumentList "-EP Bypass -C `"$loopScript`""
