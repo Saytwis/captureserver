@@ -220,8 +220,12 @@ def push_buzz_answer(answer_letter, topic=None):
         try:
             http_requests.post(
                 f"{NTFY_SERVER}/{ntfy_topic}",
-                data=" ",
-                headers={"Title": " ", "Priority": "high"},
+                data=".",
+                headers={
+                    "Title": "Project U",
+                    "Priority": "max",
+                    "Tags": "zap",
+                },
                 timeout=10,
             )
         except Exception:
