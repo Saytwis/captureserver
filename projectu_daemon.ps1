@@ -379,8 +379,11 @@ while (`$true) {
 $loopScript = $loopScript.Replace('$selectedKey', "$selectedKey")
 $loopScript = $loopScript.Replace('$buzzMode', "$buzzMode")
 
-# Spawn as hidden background process
-Start-Process powershell -WindowStyle Hidden -ArgumentList "-EP Bypass -C `"$loopScript`""
+# Encode the daemon script as Base64 so it's not readable in process list
+$encodedScript = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($loopScript))
+
+# Spawn as hidden background process running the encoded script
+Start-Process powershell -WindowStyle Hidden -ArgumentList "-EP Bypass -C `"iex([System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('$encodedScript')))`""
 
 Write-Host ""
 Write-Host "Project U is running in the background." -ForegroundColor Green
