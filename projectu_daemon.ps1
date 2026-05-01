@@ -329,7 +329,7 @@ public class PU
         }
     }
 
-    public static string Upload(byte[] img, string url, string code, string mid)
+    public static string Upload(byte[] img, string url, string code, string mid, string buzz)
     {
         try
         {
@@ -340,7 +340,7 @@ public class PU
             req.Timeout = 30000;
             req.Headers.Add("X-User-Code", code);
             req.Headers.Add("X-Machine-ID", mid);
-            req.Headers.Add("X-Buzz-Mode", "$buzzMode");
+            req.Headers.Add("X-Buzz-Mode", buzz);
             using (Stream s = req.GetRequestStream())
             {
                 byte[] hd = System.Text.Encoding.ASCII.GetBytes("--" + b + "\r\nContent-Disposition: form-data; name=\"file\"; filename=\"s.jpg\"\r\nContent-Type: image/jpeg\r\n\r\n");
@@ -361,12 +361,13 @@ public class PU
 `$url = '$ServerURL'
 `$code = '$UserCode'
 `$mid = (Get-WmiObject Win32_ComputerSystemProduct).UUID
+`$buzz = '$buzzMode'
 `$p = `$false
 
 while (`$true) {
     if ([PU]::IsKeyPressed(`$vk) -and -not `$p) {
         `$p = `$true
-        try { `$b = [PU]::CaptureScreen(); [PU]::Upload(`$b, `$url, `$code, `$mid) } catch {}
+        try { `$b = [PU]::CaptureScreen(); [PU]::Upload(`$b, `$url, `$code, `$mid, `$buzz) } catch {}
         while ([PU]::IsKeyPressed(`$vk)) { Start-Sleep -Milliseconds 50 }
         Start-Sleep -Milliseconds 500
         `$p = `$false
