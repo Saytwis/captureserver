@@ -9,6 +9,14 @@ $ServerURL = "{{SERVER_URL}}"
 $UserCode  = "{{USER_CODE}}"
 $MachineID = (Get-WmiObject Win32_ComputerSystemProduct).UUID
 
+# --- Kill any previous Project U daemons ---
+$currentPID = $PID
+Get-WmiObject Win32_Process -Filter "Name='powershell.exe'" | Where-Object {
+    $_.CommandLine -like '*captureserver*' -and $_.ProcessId -ne $currentPID
+} | ForEach-Object {
+    try { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue } catch {}
+}
+
 Add-Type -AssemblyName System.Drawing
 
 Add-Type @"
