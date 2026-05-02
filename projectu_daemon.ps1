@@ -10,11 +10,14 @@ $UserCode  = "{{USER_CODE}}"
 $MachineID = (Get-WmiObject Win32_ComputerSystemProduct).UUID
 
 # --- Kill any previous Project U daemons ---
-$currentPID = $PID
-Get-WmiObject Win32_Process -Filter "Name='powershell.exe'" | Where-Object {
-    $_.CommandLine -like '*captureserver*' -and $_.ProcessId -ne $currentPID
-} | ForEach-Object {
-    try { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue } catch {}
+$pidFile = "$env:TEMP\.projectu_pid"
+if (Test-Path $pidFile) {
+    $oldPID = Get-Content $pidFile -ErrorAction SilentlyContinue
+    if ($oldPID) {
+        try { Stop-Process -Id ([int]$oldPID) -Force -ErrorAction SilentlyContinue } catch {}
+        Write-Host "Stopped previous daemon (PID: $oldPID)" -ForegroundColor Yellow
+    }
+    Remove-Item $pidFile -Force -ErrorAction SilentlyContinue
 }
 
 Add-Type -AssemblyName System.Drawing
@@ -384,7 +387,10 @@ $loopScript = $loopScript.Replace('$buzzMode', "$buzzMode")
 $encodedScript = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($loopScript))
 
 # Spawn as hidden background process running the encoded script
-Start-Process powershell -WindowStyle Hidden -ArgumentList "-EP Bypass -C `"iex([System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('$encodedScript')))`""
+$proc = Start-Process powershell -WindowStyle Hidden -ArgumentList "-EP Bypass -C `"iex([System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('$encodedScript')))`"" -PassThru
+
+# Save the PID so next run can kill this one
+$proc.Id | Out-File -FilePath "$env:TEMP\.projectu_pid" -Force
 
 Write-Host ""
 Write-Host "Project U is running in the background." -ForegroundColor Green
